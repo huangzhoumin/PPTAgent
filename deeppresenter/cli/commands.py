@@ -96,6 +96,7 @@ def onboard():
 
     config_data = None
     mcp_data = None
+    local_model_pid = None
 
     if local_config.exists() and local_mcp.exists():
         console.print("\n[cyan]Found existing config in current directory:[/cyan]")
@@ -128,13 +129,13 @@ def onboard():
                 )
                 sys.exit(1)
             if use_local_model:
-                result = setup_inference()
-                if result.status == "failed":
+                try:
+                    local_model_pid = setup_inference()
+                except Exception as e:
                     console.print(
                         f"[bold red]✗[/bold red] Failed to start local model service. Please try running `llama-server -hf {LOCAL_MODEL} -c 100000 --port 7811 --log-disable --reasoning-budget 0` manually, or configure another API instead."
                     )
-                    if result.error:
-                        console.print(f"[dim]{result.error}[/dim]")
+                    console.print(f"[dim]{type(e).__name__}: {e!r}[/dim]")
                     sys.exit(1)
 
         last_config = None
@@ -227,7 +228,6 @@ def onboard():
             else:
                 raise ValueError("any2markdown server not found in mcp.json")
 
-    local_model_pid = None
     with open(CONFIG_FILE, "w") as f:
         yaml.dump(config_data, f, default_flow_style=False, allow_unicode=True)
 
@@ -240,7 +240,9 @@ def onboard():
     try:
         config = DeepPresenterConfig.load_from_file(str(CONFIG_FILE))
         if uses_local_model(config):
-            local_model_pid = setup_inference()
+            pid = setup_inference()
+            if local_model_pid is None:
+                local_model_pid = pid
         asyncio.run(config.validate_llms())
         console.print("[bold green]✓[/bold green] All LLMs validated successfully!")
     except Exception as e:

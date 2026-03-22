@@ -2,7 +2,7 @@
     {
         "name": "any2markdown",
         "description": "File conversion tools",
-        "command": "python",
+        "command": "python3",
         "args": [
             "$PACKAGE_DIR/tools/any2markdown.py",
             "$WORKSPACE"
@@ -14,7 +14,7 @@
     {
         "name": "task",
         "description": "Task management tools",
-        "command": "python",
+        "command": "python3",
         "args": [
             "$PACKAGE_DIR/tools/task.py",
             "$WORKSPACE"
@@ -26,7 +26,7 @@
     {
         "name": "deeppresenter",
         "description": "Artifact inspection tools for deeppresenter",
-        "command": "python",
+        "command": "python3",
         "args": [
             "$PACKAGE_DIR/tools/reflect.py",
             "$WORKSPACE"
@@ -38,7 +38,7 @@
     {
         "name": "tool_agents",
         "description": "LLM-powered tool agents",
-        "command": "python",
+        "command": "python3",
         "args": [
             "$PACKAGE_DIR/tools/tool_agents.py",
             "$WORKSPACE"
@@ -47,7 +47,7 @@
     {
         "name": "research",
         "description": "Academic paper search tools",
-        "command": "python",
+        "command": "python3",
         "args": [
             "$PACKAGE_DIR/tools/research.py",
             "$WORKSPACE"
@@ -57,7 +57,7 @@
     {
         "name": "search",
         "description": "Web search tools",
-        "command": "python",
+        "command": "python3",
         "args": [
             "$PACKAGE_DIR/tools/search.py",
             "$WORKSPACE"

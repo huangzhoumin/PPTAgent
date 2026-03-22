@@ -107,16 +107,15 @@ Use this mode if you want the fastest local setup or want to plug DeepPresenter 
 ```bash
 # Install uv
 curl -LsSf https://astral.sh/uv/install.sh | sh
-uv tool install pptagent
 
 # First-time interactive setup
-pptagent onboard
+uvx pptagent onboard
 
 # Generate a presentation
-pptagent generate "Single Page with Title: Hello World" -o hello.pptx
+uvx pptagent generate "Single Page with Title: Hello World" -o hello.pptx
 
 # Generate with attachments
-pptagent generate "Q4 Report" \
+uvx pptagent generate "Q4 Report" \
   -f data.xlsx \
   -f charts.pdf \
   -p "10-12" \

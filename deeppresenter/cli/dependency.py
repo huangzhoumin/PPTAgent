@@ -3,12 +3,13 @@
 import platform
 import shutil
 import subprocess
+import sys
 
 from rich.prompt import Confirm
 
 import deeppresenter.utils.webview as webview
 
-from .common import console, run_streaming_command
+from .common import LOCAL_LID_MODEL, console, run_streaming_command
 
 SANDBOX_IMAGE = "deeppresenter-sandbox:0.1.0"
 SANDBOX_IMAGE_SOURCE = "forceless/deeppresenter-sandbox:0.1.0"
@@ -55,19 +56,32 @@ def ensure_llamacpp() -> bool:
     """Ensure llama.cpp is available for local model service."""
     if shutil.which("llama-server") is not None:
         console.print("[green]✓[/green] llama.cpp already installed")
-        return True
+    else:
+        if not ensure_homebrew():
+            console.print(
+                "[bold red]✗[/bold red] Homebrew is required for local model setup"
+            )
+            return False
 
-    if not ensure_homebrew():
-        console.print(
-            "[bold red]✗[/bold red] Homebrew is required for local model setup"
-        )
-        return False
+        console.print("[cyan]Installing llama.cpp with Homebrew...[/cyan]")
+        if not run_streaming_command(
+            ["brew", "install", "llama.cpp"],
+            success_message="[green]✓[/green] llama.cpp installed",
+            failure_message="[bold red]✗[/bold red] Failed to install llama.cpp",
+        ):
+            return False
 
-    console.print("[cyan]Installing llama.cpp with Homebrew...[/cyan]")
+    modelscope_cmd = (
+        ["modelscope", "download", LOCAL_LID_MODEL]
+        if shutil.which("modelscope") is not None
+        else [sys.executable, "-m", "modelscope", "download", LOCAL_LID_MODEL]
+    )
+
+    console.print(f"[cyan]Downloading {LOCAL_LID_MODEL} with ModelScope...[/cyan]")
     return run_streaming_command(
-        ["brew", "install", "llama.cpp"],
-        success_message="[green]✓[/green] llama.cpp installed",
-        failure_message="[bold red]✗[/bold red] Failed to install llama.cpp",
+        modelscope_cmd,
+        success_message=f"[green]✓[/green] {LOCAL_LID_MODEL} downloaded",
+        failure_message=f"[bold red]✗[/bold red] Failed to download {LOCAL_LID_MODEL}",
     )
 
 

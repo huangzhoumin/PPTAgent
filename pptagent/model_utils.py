@@ -23,6 +23,7 @@ _LID_MODEL = None
 
 def _get_lid_model():
     from huggingface_hub.constants import HUGGINGFACE_HUB_CACHE
+    from modelscope.hub.utils.utils import get_cache_dir
 
     """Get the language ID model, loading it lazily on first access."""
     global _LID_MODEL
@@ -30,12 +31,12 @@ def _get_lid_model():
         from fasttext import load_model
         from huggingface_hub import hf_hub_download
 
-        lid_pattern = join(
+        hf_pattern = join(
             HUGGINGFACE_HUB_CACHE,
-            "models--julien-c--fasttext-language-id",
-            "*/*/lid.176.bin",
+            "*/*/*/lid.176.bin",
         )
-        lid_files = glob(lid_pattern)
+        ms_pattern = join(get_cache_dir(), "*/*/*/lid.176.bin")
+        lid_files = glob(hf_pattern) + glob(ms_pattern)
         if lid_files:
             _LID_MODEL = load_model(lid_files[0])
         else:
