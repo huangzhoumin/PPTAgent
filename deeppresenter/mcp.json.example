@@ -18,10 +18,7 @@
         "args": [
             "$PACKAGE_DIR/tools/task.py",
             "$WORKSPACE"
-        ],
-        "env": {
-            "CONFIG_FILE": "$CONFIG_FILE"
-        }
+        ]
     },
     {
         "name": "deeppresenter",
@@ -30,10 +27,7 @@
         "args": [
             "$PACKAGE_DIR/tools/reflect.py",
             "$WORKSPACE"
-        ],
-        "env": {
-            "CONFIG_FILE": "$CONFIG_FILE"
-        }
+        ]
     },
     {
         "name": "tool_agents",

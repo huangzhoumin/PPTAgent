@@ -21,7 +21,7 @@ services:
       - /usr/src/pptagent/deeppresenter/html2pptx/node_modules
       - /var/run/docker.sock:/var/run/docker.sock
       - /usr/bin/docker:/usr/bin/docker:ro
-      - $HOME/.cache/huggingface:/root/.cache/huggingface
+      - $HOME/.cache:/root/.cache
 
 volumes:
   deeppresenter_workspace:

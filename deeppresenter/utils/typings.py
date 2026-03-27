@@ -193,15 +193,26 @@ class InputRequest(BaseModel):
         if not self.attachments:
             return
         (workspace / "attachments").mkdir(parents=True, exist_ok=True)
-        new_attachments = [
-            workspace / "attachments" / Path(att).name for att in self.attachments
-        ]
-        for att, dst_path in zip(self.attachments, new_attachments):
-            assert os.path.exists(att), f"Attachment {att} does not exist"
+        new_attachments: list[Path] = []
+        workspace = workspace.resolve()
+        for att in self.attachments:
+            src_path = Path(att).expanduser().resolve()
+            assert src_path.exists(), f"Attachment {att} does not exist"
+            if src_path.is_relative_to(workspace):
+                new_attachments.append(src_path)
+                continue
+
+            dst_path = workspace / "attachments" / src_path.name
             if dst_path.exists():
                 warning(f"Attachment {att} already exists in workspace")
+                new_attachments.append(dst_path)
                 continue
-            shutil.copy(att, dst_path)
+            if src_path.is_dir():
+                shutil.copytree(src_path, dst_path)
+            else:
+                shutil.copy(src_path, dst_path)
+            new_attachments.append(dst_path)
+
         self.attachments = [str(a) for a in new_attachments]
 
     @property

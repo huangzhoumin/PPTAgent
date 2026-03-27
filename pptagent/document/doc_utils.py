@@ -269,10 +269,11 @@ class LogicHeadings(BaseModel):
     headings: list[str]
 
     def model_post_init(self, _):
-        self.headings = [
-            max(_allowed_headings.get(), key=lambda x: edit_distance(x, h))
-            for h in self.headings
-        ]
+        if len(self.headings):
+            self.headings = [
+                max(_allowed_headings.get(), key=lambda x: edit_distance(x, h))
+                for h in self.headings
+            ]
 
     @classmethod
     def response_model(cls, allowed_headings: list[str]):

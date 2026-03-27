@@ -161,6 +161,9 @@ Use this mode for a stable server environment with explicit dependencies.
 # Pull the public images to avoid build from source
 docker pull forceless/deeppresenter-sandbox:0.1.0
 docker tag forceless/deeppresenter-sandbox:0.1.0 deeppresenter-sandbox:0.1.0
+docker pull forceless/deeppresenter-host:0.1.0
+docker tag forceless/deeppresenter-host:0.1.0 deeppresenter-host:0.1.0
+
 
 # Or build from source
 docker build -t deeppresenter-sandbox:0.1.0 -f deeppresenter/docker/SandBox.Dockerfile .
