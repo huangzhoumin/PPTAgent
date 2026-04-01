@@ -139,6 +139,7 @@ uv pip install -e .
 playwright install-deps
 playwright install chromium
 npm install --prefix deeppresenter/html2pptx
+modelscope download forceless/fasttext-language-id
 
 docker pull forceless/deeppresenter-sandbox:0.1.0
 docker tag forceless/deeppresenter-sandbox:0.1.0 deeppresenter-sandbox:0.1.0
