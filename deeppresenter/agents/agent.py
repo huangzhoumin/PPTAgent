@@ -288,11 +288,10 @@ class Agent:
 
         self.chat_history.extend(observations)
 
-        for t, o in zip(
-            sorted(tool_calls, key=lambda x: x.id),
-            sorted(observations, key=lambda x: x.id),
-        ):
+        tool_call_map = {t.id: t for t in tool_calls}
+        for o in observations:
             if o.is_error:
+                t = tool_call_map[o.tool_call_id]
                 self.error_history.append(t)
                 self.error_history.append(o)
 

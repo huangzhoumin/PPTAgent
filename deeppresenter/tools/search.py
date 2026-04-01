@@ -1,7 +1,6 @@
 import asyncio
 import os
 import re
-import sys
 from io import BytesIO
 from pathlib import Path
 from typing import Any, Literal
@@ -245,8 +244,7 @@ async def download_file(url: str, output_file: str) -> str:
 
 
 if __name__ == "__main__":
-    assert len(sys.argv) == 2, "Usage: python search.py <workspace>"
-    work_dir = Path(sys.argv[1])
+    work_dir = Path(os.environ["WORKSPACE"])
     assert work_dir.exists(), f"Workspace {work_dir} does not exist."
     os.chdir(work_dir)
     set_logger(f"search-{work_dir.stem}", work_dir / ".history" / "search.log")

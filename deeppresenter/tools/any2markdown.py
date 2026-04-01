@@ -1,7 +1,6 @@
 import base64
 import os
 import re
-import sys
 import uuid
 from pathlib import Path
 
@@ -128,8 +127,7 @@ def parse_base64_images(markdown: str, image_dir: Path) -> str:
 
 
 if __name__ == "__main__":
-    assert len(sys.argv) == 2, "Usage: python any2markdown.py <workspace>"
-    work_dir = Path(sys.argv[1])
+    work_dir = Path(os.environ["WORKSPACE"])
     assert work_dir.exists(), f"Workspace {work_dir} does not exist."
     os.chdir(work_dir)
     set_logger(

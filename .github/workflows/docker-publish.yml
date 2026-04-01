@@ -2,10 +2,7 @@ name: Docker Build and Push
 
 on:
   push:
-    branches: [ "main" ]
     tags: [ 'v*.*.*' ]
-  pull_request:
-    branches: [ "main" ]
 
 jobs:
   build:
@@ -42,11 +39,8 @@ jobs:
         with:
           images: forceless/${{ matrix.image-name }}
           tags: |
+            type=raw,value=latest
             type=semver,pattern={{version}}
-            type=edge,branch=main,suffix=-latest
-            type=sha
-            type=ref,event=branch
-            type=ref,event=pr
 
       - name: Build and push Docker image
         id: build-and-push

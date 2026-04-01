@@ -1,7 +1,6 @@
 import base64
 import os
 import re
-import sys
 import tempfile
 from collections import defaultdict
 from pathlib import Path
@@ -115,8 +114,7 @@ def inspect_manuscript(md_file: str) -> dict:
 
 
 if __name__ == "__main__":
-    assert len(sys.argv) == 2, "Usage: python task.py <workspace>"
-    work_dir = Path(sys.argv[1])
+    work_dir = Path(os.environ["WORKSPACE"])
     assert work_dir.exists(), f"Workspace {work_dir} does not exist."
     os.chdir(work_dir)
     set_logger(f"task-{work_dir.stem}", work_dir / ".history" / "task.log")
