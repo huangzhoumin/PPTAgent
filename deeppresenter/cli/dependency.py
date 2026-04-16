@@ -43,7 +43,7 @@ def ensure_homebrew() -> bool:
             [
                 "/bin/bash",
                 "-c",
-                "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)",
+                "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh| tail -n +2)",
             ],
             success_message="[green]✓[/green] Homebrew installed successfully",
             failure_message="[bold red]✗[/bold red] Homebrew installation failed",
@@ -53,23 +53,39 @@ def ensure_homebrew() -> bool:
 
 
 def ensure_llamacpp() -> bool:
-    """Ensure llama.cpp is available for local model service."""
-    if shutil.which("llama-server") is not None:
-        console.print("[green]✓[/green] llama.cpp already installed")
+    """Ensure Ollama is available for local model service."""
+    # Check if Ollama is installed
+    if shutil.which("ollama") is not None:
+        console.print("[green]✓[/green] Ollama already installed")
     else:
-        if not ensure_homebrew():
-            console.print(
-                "[bold red]✗[/bold red] Homebrew is required for local model setup"
-            )
-            return False
-
-        console.print("[cyan]Installing llama.cpp with Homebrew...[/cyan]")
-        if not run_streaming_command(
-            ["brew", "install", "llama.cpp"],
-            success_message="[green]✓[/green] llama.cpp installed",
-            failure_message="[bold red]✗[/bold red] Failed to install llama.cpp",
-        ):
-            return False
+        console.print("[yellow]Ollama not found. Please install Ollama from https://ollama.com[/yellow]")
+        console.print("[yellow]On macOS/Linux: curl -fsSL https://ollama.com/install.sh | sh[/yellow]")
+        return False
+    
+    # Check if Ollama server is running
+    from .model import is_local_model_server_running
+    if is_local_model_server_running():
+        console.print("[green]✓[/green] Ollama server is running")
+    else:
+        console.print("[yellow]Ollama server is not running. Starting Ollama...[/yellow]")
+        # Try to start Ollama service
+        import subprocess
+        try:
+            # Start Ollama in the background
+            subprocess.Popen(["ollama", "serve"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            console.print("[cyan]Started Ollama server[/cyan]")
+            
+            # Wait a bit for server to start
+            import time
+            for _ in range(10):
+                time.sleep(1)
+                if is_local_model_server_running():
+                    console.print("[green]✓[/green] Ollama server is now running")
+                    break
+            else:
+                console.print("[yellow]⚠[/yellow] Ollama server may still be starting up")
+        except Exception as e:
+            console.print(f"[yellow]⚠[/yellow] Could not start Ollama: {e}")
 
     modelscope_cmd = (
         ["modelscope", "download", LOCAL_LID_MODEL]

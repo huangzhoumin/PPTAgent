@@ -1,4 +1,7 @@
 
+T4GPU 显卡，跑一次耗费 28min.
+
+
 <div align="right">
   <details>
     <summary >🌐 Language</summary>

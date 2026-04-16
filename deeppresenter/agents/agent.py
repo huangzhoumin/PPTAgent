@@ -2,7 +2,7 @@ import asyncio
 import json
 import uuid
 from abc import abstractmethod
-from collections.abc import AsyncGenerator
+from collections.abc import AsyncGenerator, Awaitable, Callable
 from datetime import datetime
 from pathlib import Path
 from typing import Literal
@@ -30,8 +30,6 @@ from deeppresenter.utils.constants import (
     HALF_BUDGET_NOTICE_MSG,
     HIST_LOST_MSG,
     LAST_ITER_MSG,
-    MA_RESEACHER_PROMPT,
-    MA_RRESENTER_PROMPT,
     MAX_LOGGING_LENGTH,
     MAX_TOOLCALL_PER_TURN,
     MEMORY_COMPACT_MSG,
@@ -62,7 +60,6 @@ class Agent:
         language: Literal["zh", "en"],
         config_file: str | None = None,
         keep_reasoning: bool = True,
-        max_turns: int | None = None,
     ):
         self.name = self.__class__.__name__
         self.cost = Cost()
@@ -74,8 +71,6 @@ class Agent:
         self.keep_reasoning = keep_reasoning
         self.context_window = config.context_window
         self.max_context_turns = config.max_context_folds
-        self.max_turns = max_turns
-        self.turn_count = 0
         config_file = (
             Path(config_file)
             if config_file
@@ -89,6 +84,7 @@ class Agent:
         with open(config_file, encoding="utf-8") as f:
             config_data = yaml.safe_load(f)
         self.role_config = RoleConfig(**config_data)
+        print(f"self.role_config.use_model = {self.role_config.use_model}")
         self.llm: LLM = config[self.role_config.use_model]
         self.model = self.llm.model_name
         self._setup_toolset()
@@ -112,12 +108,6 @@ class Agent:
                 time=datetime.now().strftime("%Y-%m-%d"),
                 max_toolcall_per_turn=MAX_TOOLCALL_PER_TURN,
             )
-
-        if any(t["function"]["name"] == "delegate_subagent" for t in self.tools):
-            if self.name == "Research":
-                self.system += MA_RESEACHER_PROMPT
-            elif self.name == "Design":
-                self.system += MA_RRESENTER_PROMPT
 
         if config.offline_mode:
             self.system += OFFLINE_PROMPT
@@ -154,10 +144,23 @@ class Agent:
             if tool_name in toolset.include_tools:
                 self.tools.append(tool)
 
+    async def _run_llm(self, **kwargs):
+        """Call llm.run with a compatibility fallback for older signatures."""
+        try:
+            return await self.llm.run(**kwargs)
+        except TypeError as e:
+            if "on_stream_chunk" not in str(e) or "on_stream_chunk" not in kwargs:
+                raise
+            print(f"err, pop on_stream_chunk")
+            fallback_kwargs = dict(kwargs)
+            fallback_kwargs.pop("on_stream_chunk", None)
+            return await self.llm.run(**fallback_kwargs)
+
     async def chat(
         self,
         message: ChatMessage,
         response_format: type[BaseModel] | None = None,
+        on_stream_chunk: Callable[[str], Awaitable[None] | None] | None = None,
         **chat_kwargs,
     ) -> ChatMessage:
         if len(self.chat_history) == 1:
@@ -168,9 +171,10 @@ class Agent:
         self.chat_history.append(message)
         self.log_message(self.chat_history[-1])
         with timer(f"{self.name} Agent LLM chat"):
-            response = await self.llm.run(
+            response = await self._run_llm(
                 messages=self.chat_history,
                 response_format=response_format,
+                on_stream_chunk=on_stream_chunk,
             )
             if response.usage is not None:
                 self.cost += response.usage
@@ -190,22 +194,10 @@ class Agent:
 
     async def action(
         self,
+        on_stream_chunk: Callable[[str], Awaitable[None] | None] | None = None,
         **chat_kwargs,
     ):
         """Tool calling interface"""
-        self.turn_count += 1
-        if self.max_turns is not None:
-            if self.turn_count > self.max_turns:
-                raise RuntimeError(
-                    f"{self.name} exceeded max turns: {self.turn_count - 1}/{self.max_turns}"
-                )
-            if self.max_turns - self.turn_count < 2:
-                self.chat_history[-1].content.append(
-                    {
-                        "type": "text",
-                        "text": f"You have only {self.max_turns - self.turn_count} turn left. Finish the remaing work soonly and call `finalize` immediately.",
-                    }
-                )
 
         if len(self.chat_history) == 1:
             self.chat_history.append(
@@ -215,16 +207,18 @@ class Agent:
                 )
             )
             self.log_message(self.chat_history[-1])
-
+        print(f"{self.name} Agent LLM call")
         with timer(f"{self.name} Agent LLM call"):
-            response = await self.llm.run(
+            response = await self._run_llm(
                 messages=self.chat_history,
                 tools=self.tools,
+                on_stream_chunk=on_stream_chunk,
             )
-            if response.usage is not None:
-                self.cost += response.usage
-                self.context_length = response.usage.total_tokens
-            agent_message: ChatCompletionMessage = response.choices[0].message
+        if response.usage is not None:
+            self.cost += response.usage
+            self.context_length = response.usage.total_tokens
+        agent_message: ChatCompletionMessage = response.choices[0].message
+        print(f"agent_message = {agent_message}")
         self.chat_history.append(
             ChatMessage(
                 role=Role.ASSISTANT,
@@ -251,7 +245,10 @@ class Agent:
     async def finish(self, result: str):
         """This function defines when and how should an agent finish their tasks, combined with outcome check"""
 
-    async def execute(self, tool_calls: list[ToolCall]) -> str | list[ChatMessage]:
+    async def execute(
+        self, tool_calls: list[ToolCall] | None
+    ) -> str | list[ChatMessage]:
+        tool_calls = tool_calls or []
         coros = []
         observations: list[ChatMessage] = []
         used_tools = set()
@@ -329,12 +326,14 @@ class Agent:
         if (
             self.context_warning == 0
             and self.context_length > self.context_window * 0.5
+            and observations
         ):
             self.context_warning += 1
             observations[0].content.insert(0, HALF_BUDGET_NOTICE_MSG)
         elif (
             self.context_warning == 1
             and self.context_length > self.context_window * 0.8
+            and observations
         ):
             observations[0].content.insert(0, URGENT_BUDGET_NOTICE_MSG)
             self.context_warning = 2

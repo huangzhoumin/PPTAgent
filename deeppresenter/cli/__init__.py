@@ -19,6 +19,7 @@ app = typer.Typer(
 app.command()(onboard)
 app.command()(serve)
 app.command()(generate)
+# app.command()(tui)
 app.command()(config)
 app.command()(clean)
 

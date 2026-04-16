@@ -184,13 +184,7 @@ def finalize(outcome: str, agent_name: str = "") -> str:
     # here we conduct some final checks on agent's outcome
     path = Path(outcome)
     assert path.exists(), f"Outcome {outcome} does not exist"
-
-    if agent_name == "Planner":
-        assert path.suffix == ".json", (
-            f"Outline file should be a JSON file, got {path.suffix}"
-        )
-
-    elif agent_name == "Research":
+    if agent_name == "Research":
         md_dir = path.parent
         assert path.suffix == ".md", (
             f"Outcome file should be a markdown file, got {path.suffix}"
@@ -222,9 +216,8 @@ def finalize(outcome: str, agent_name: str = "") -> str:
             return "Outcome path should be a directory containing HTML files"
         if not all(f.stem.startswith("slide_") for f in html_files):
             return "All HTML files should start with 'slide_'"
-    elif path.is_file() and agent_name:
-        if path.stat().st_size == 0:
-            return f"Outcome file for {agent_name} is empty"
+    else:
+        warning(f"Unverifiable agent: {agent_name}")
 
     if LOCAL_TODO_CSV_PATH.exists():
         LOCAL_TODO_CSV_PATH.unlink()

@@ -7,10 +7,8 @@ from typing import Literal
 
 from deeppresenter.agents.design import Design
 from deeppresenter.agents.env import AgentEnv
-from deeppresenter.agents.planner import Planner
 from deeppresenter.agents.pptagent import PPTAgent
 from deeppresenter.agents.research import Research
-from deeppresenter.agents.subagent import SubAgent
 from deeppresenter.utils.config import DeepPresenterConfig
 from deeppresenter.utils.constants import WORKSPACE_BASE
 from deeppresenter.utils.log import debug, error, set_logger, timer, warning
@@ -53,7 +51,7 @@ class AgentLoop:
             check_llms: Whether to check LLM availability before running.
             soft_parsing: Whether to use soft parsing on html2pptx.
         Yields:
-            ChatMessage or final output path (str). Outline path stored in intermediate_output["outline"].
+            ChatMessage or str: Messages or final output path.
         """
         if not self.config.design_agent.is_multimodal and self.config.heavy_reflect:
             debug(
@@ -65,53 +63,12 @@ class AgentLoop:
         with open(self.workspace / ".input_request.json", "w") as f:
             json.dump(request.model_dump(), f, ensure_ascii=False, indent=2)
         async with AgentEnv(self.workspace, self.config) as agent_env:
-            hello_message = f"DeepPresenter running in {self.workspace}, with {len(request.attachments)} attachments, prompt={request.instruction}"
-            modes = []
-            if self.config.offline_mode:
-                modes.append("Offline Mode")
             self.agent_env = agent_env
-            if self.config.multiagent_mode:
-                self.agent_env.register_tool(
-                    SubAgent.delegate(
-                        self.config, agent_env, self.workspace, self.language
-                    )
-                )
-                modes.append("Multiagent Mode")
-            if modes:
-                hello_message += f" [{', '.join(modes)}]"
+            hello_message = f"DeepPresenter running in {self.workspace}, with {len(request.attachments)} attachments, prompt={request.instruction}"
+            if self.config.offline_mode:
+                hello_message += " [Offline Mode]"
             debug(hello_message)
-
             yield ChatMessage(role=Role.SYSTEM, content=hello_message)
-
-            # ── Optional Planner phase ────────────────────────────────────
-            if request.enable_planner:
-                self.planner = Planner(
-                    self.config,
-                    agent_env,
-                    self.workspace,
-                    self.language,
-                )
-                self.agent = self.planner
-                self.planner_gen = self.planner.loop(request)
-                try:
-                    async for msg in self.planner_gen:
-                        if isinstance(msg, str):
-                            outline_path = Path(msg)
-                            if not outline_path.is_absolute():
-                                outline_path = self.workspace / outline_path
-                            self.intermediate_output["outline"] = outline_path
-                            yield str(outline_path)
-                            break
-                        yield msg
-                except Exception as e:
-                    error_message = f"Planner agent failed with error: {e}\n{traceback.format_exc()}"
-                    error(error_message)
-                    raise e
-                finally:
-                    self.planner.save_history()
-                    await self.planner_gen.aclose()
-                    self.save_results()
-
             self.research_agent = Research(
                 self.config,
                 agent_env,
@@ -120,9 +77,7 @@ class AgentLoop:
             )
             self.agent = self.research_agent
             try:
-                async for msg in self.research_agent.loop(
-                    request, self.intermediate_output.get("outline", None)
-                ):
+                async for msg in self.research_agent.loop(request):
                     if isinstance(msg, str):
                         md_file = Path(msg)
                         if not md_file.is_absolute():
@@ -140,7 +95,6 @@ class AgentLoop:
             finally:
                 self.research_agent.save_history()
                 self.save_results()
-
             if request.convert_type == ConvertType.PPTAGENT:
                 self.pptagent = PPTAgent(
                     self.config,

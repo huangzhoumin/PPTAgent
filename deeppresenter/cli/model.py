@@ -22,14 +22,17 @@ from .common import (
 
 
 def is_local_model_server_running() -> bool:
-    """Check whether local OpenAI-compatible server responds on /v1/models."""
+    """Check whether Ollama server responds on /v1/models."""
     try:
+        # Ollama uses port 11434
         models_url = f"{LOCAL_BASE_URL}/models"
+        print(f"models_url = {models_url}")
         req = Request(models_url, method="GET")
         with urlopen(req) as resp:
             if resp.status != 200:
                 return False
             payload = json.loads(resp.read().decode("utf-8") or "{}")
+            # OpenAI-compatible API returns {"data": [...]}
             return isinstance(payload, dict) and isinstance(payload.get("data"), list)
     except (
         HTTPError,
@@ -44,35 +47,13 @@ def is_local_model_server_running() -> bool:
 
 def _build_inference_command() -> list[str]:
     system = platform.system().lower()
-    if system == "darwin":
-        console.print(
-            f"[cyan]Local model service is not running, starting llama-server -hf {LOCAL_MODEL} -c 100000 --port 7811 --log-disable --reasoning-budget 0[/cyan]"
-        )
-        return [
-            "llama-server",
-            "-hf",
-            LOCAL_MODEL,
-            "-c",
-            "100000",
-            "--port",
-            "7811",
-            "--log-disable",
-            "--reasoning-budget",
-            "0",
-        ]
-    if system == "linux":
-        script_path = PACKAGE_DIR / "deeppresenter" / "serve.sh"
-        if not script_path.exists():
-            console.print(
-                f"[bold red]Error:[/bold red] Missing startup script: {script_path}"
-            )
-            return None
-        console.print(
-            f"[cyan]Local model service is not running, starting {script_path}[/cyan]"
-        )
-        return ["bash", str(script_path)]
-    else:
-        raise NotImplementedError(f"Local model service is not supported on {system}.")
+    print(f"system = {system}")
+    # For Ollama, we don't need to start a server command
+    # The ensure_llamacpp() function will check and start Ollama if needed
+    console.print(
+        f"[cyan]Local model service is not running. Please ensure Ollama is running with model '{LOCAL_MODEL}'[/cyan]"
+    )
+    return None
 
 
 def setup_inference() -> int | None:
@@ -80,37 +61,21 @@ def setup_inference() -> int | None:
     if is_local_model_server_running():
         return None
 
-    cmd = _build_inference_command()
-    if cmd is None:
-        raise RuntimeError("Could not build inference command for this platform.")
-
-    try:
-        process = subprocess.Popen(
-            cmd,
-            env=os.environ.copy(),
-            text=True,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-        )
-    except FileNotFoundError as e:
-        raise RuntimeError(
-            "llama-server not found. Please install llama.cpp first."
-        ) from e
-    except Exception as e:
-        raise RuntimeError(str(e)) from e
-
-    while True:
-        if is_local_model_server_running():
-            return process.pid
-
-        if process.poll() is not None:
-            if is_local_model_server_running():
-                return process.pid
-            raise RuntimeError(
-                f"Local model service exited unexpectedly with code {process.returncode}."
-            )
-
+    # For Ollama, we don't start a process, just check if server is running
+    # The ensure_llamacpp() function should have started Ollama if needed
+    console.print("[yellow]Ollama server is not running. Please start Ollama with `ollama serve`[/yellow]")
+    
+    # Wait for server to start
+    import time
+    for _ in range(30):
         time.sleep(1)
+        if is_local_model_server_running():
+            console.print("[green]✓[/green] Ollama server is now running")
+            return None  # No PID to return since we didn't start a process
+    
+    raise RuntimeError(
+        "Ollama server did not start. Please ensure Ollama is installed and running."
+    )
 
 
 def is_onboarded() -> bool:

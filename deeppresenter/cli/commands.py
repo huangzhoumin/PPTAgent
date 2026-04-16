@@ -13,14 +13,11 @@ from typing import Annotated
 
 import typer
 import yaml
-from rich.console import Console as RichConsole
 from rich.panel import Panel
 from rich.prompt import Confirm, Prompt
-from rich.table import Table
 
 from deeppresenter.main import AgentLoop, InputRequest
 from deeppresenter.utils.config import DeepPresenterConfig
-from deeppresenter.utils.outline import Outline
 
 from .common import (
     CACHE_DIR,
@@ -50,22 +47,6 @@ from .model import (
     setup_inference,
     uses_local_model,
 )
-
-
-def format_active_modes(config: DeepPresenterConfig, request: InputRequest) -> str:
-    """Format active generation modes for CLI display."""
-    modes: list[str] = [request.convert_type.value]
-    if config.offline_mode:
-        modes.append("offline")
-    if config.multiagent_mode:
-        modes.append("multiagent")
-    if config.context_folding:
-        modes.append("context-folding")
-    if config.heavy_reflect:
-        modes.append("heavy-reflect")
-    if request.enable_planner:
-        modes.append("planner")
-    return ", ".join(modes)
 
 
 def onboard():
@@ -152,7 +133,7 @@ def onboard():
                     local_model_pid = setup_inference()
                 except Exception as e:
                     console.print(
-                        f"[bold red]✗[/bold red] Failed to start local model service. Please try running `llama-server -hf {LOCAL_MODEL} -c 100000 --port 7811 --log-disable --reasoning-budget 0` manually, or configure another API instead."
+                        f"[bold red]✗[/bold red] Failed to start local model service. Please ensure Ollama is running and has model '{LOCAL_MODEL}' pulled. Run `ollama serve` and `ollama pull {LOCAL_MODEL}` manually, or configure another API instead."
                     )
                     console.print(f"[dim]{type(e).__name__}: {e!r}[/dim]")
                     sys.exit(1)
@@ -238,15 +219,6 @@ def onboard():
             else:
                 raise ValueError("search server not found in mcp.json")
 
-        if Confirm.ask("Configure SerpAPI key for Google web search?", default=False):
-            serpapi_key = Prompt.ask("SerpAPI key", password=True)
-            for server in mcp_data:
-                if server.get("name") == "search":
-                    server["env"]["SERPAPI_KEY"] = serpapi_key
-                    break
-            else:
-                raise ValueError("search server not found in mcp.json")
-
         if Confirm.ask("Configure MinerU API key for PDF parsing?", default=False):
             mineru_key = Prompt.ask("MinerU API key", password=True)
             for server in mcp_data:
@@ -324,13 +296,6 @@ def generate(
     language: Annotated[
         str, typer.Option("--lang", "-l", help="Language (en/zh)")
     ] = "en",
-    planner: Annotated[
-        bool,
-        typer.Option(
-            "--planner",
-            help="Generate and interactively edit an outline before research",
-        ),
-    ] = False,
 ):
     """Generate a presentation from prompt and optional files."""
     ensure_supported_platform()
@@ -353,7 +318,6 @@ def generate(
         attachments=attachments,
         num_pages=pages,
         powerpoint_type=aspect_ratio,
-        enable_planner=planner,
     )
 
     config = DeepPresenterConfig.load_from_file(str(CONFIG_FILE))
@@ -378,7 +342,6 @@ def generate(
             Panel.fit(
                 f"[bold]Prompt:[/bold] {prompt}\n"
                 f"[bold]Attachments:[/bold] {len(attachments)}\n"
-                f"[bold]Features:[/bold] {format_active_modes(config, request)}\n"
                 f"[bold]Workspace:[/bold] {loop.workspace}\n"
                 f"[bold]Version:[/bold] {version}",
                 title="Generation Task",
@@ -386,21 +349,8 @@ def generate(
         )
 
         try:
-            rich_console = RichConsole()
             async for msg in loop.run(request):
-                if isinstance(msg, (str, Path)) and str(msg) == str(
-                    loop.intermediate_output.get("outline")
-                ):
-                    outline_path = Path(msg)
-                    await _edit_outline(
-                        rich_console,
-                        Outline.model_validate_json(
-                            outline_path.read_text(encoding="utf-8-sig")
-                        ),
-                        loop.planner_gen,
-                        outline_path,
-                    )
-                elif isinstance(msg, (str, Path)):
+                if isinstance(msg, (str, Path)):
                     generated_file = Path(msg)
                     output_path = Path(output).resolve()
                     output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -523,7 +473,7 @@ def serve():
         pid = setup_inference()
     except Exception as e:
         console.print(
-            f"[bold red]✗[/bold red] Failed to start local model service. Please try running `llama-server -hf {LOCAL_MODEL} -c 100000 --port 7811 --log-disable --reasoning-budget 0` manually."
+            f"[bold red]✗[/bold red] Failed to start local model service. Please ensure Ollama is running and has model '{LOCAL_MODEL}' pulled. Run `ollama serve` and `ollama pull {LOCAL_MODEL}` manually."
         )
         console.print(f"[dim]{e}[/dim]")
         sys.exit(1)
@@ -531,67 +481,3 @@ def serve():
     pid = pid or _find_local_model_pid()
     pid_str = f" (PID: {pid})" if pid else ""
     console.print(f"[green]✓[/green] Local model service is ready{pid_str} at {ui_url}")
-
-
-async def _edit_outline(
-    rich_console: RichConsole, outline: Outline, planner_gen, outline_path
-) -> None:
-    _render_outline(rich_console, outline)
-    _print_menu(rich_console)
-    while True:
-        try:
-            raw = Prompt.ask("[bold]> Instruction[/bold]", default="y").strip()
-        except (EOFError, KeyboardInterrupt):
-            rich_console.print("\n[yellow]Keeping outline as-is.[/yellow]")
-            raw = "y"
-        if not raw:
-            continue
-        if raw.lower() == "y":
-            rich_console.print("[bold green]✓ Outline approved.[/bold green]")
-            outline_path.write_text(
-                outline.model_dump_json(indent=2, ensure_ascii=False),
-                encoding="utf-8",
-            )
-            try:
-                await planner_gen.asend(None)
-            except StopAsyncIteration:
-                pass
-            break
-
-        rich_console.print("[dim]Requesting AI revision…[/dim]")
-        try:
-            result = await planner_gen.asend(raw)
-            while not isinstance(result, (str, Path)):
-                result = await planner_gen.asend(None)
-            outline_path = Path(result)
-            outline = Outline.model_validate_json(
-                outline_path.read_text(encoding="utf-8-sig")
-            )
-        except Exception as exc:
-            rich_console.print(f"[red]AI revision failed: {exc}[/red]")
-            continue
-        _render_outline(rich_console, outline)
-        _print_menu(rich_console)
-
-
-def _render_outline(rich_console: RichConsole, outline: Outline) -> None:
-    table = Table(
-        title="Current Outline",
-        show_header=True,
-        header_style="bold cyan",
-        show_lines=True,
-    )
-    table.add_column("#", style="bold", width=4)
-    table.add_column("Title", style="bold green", min_width=20)
-    table.add_column("Context", min_width=40)
-    for slide in outline.slides:
-        table.add_row(str(slide.index), slide.title, slide.context)
-    rich_console.print(table)
-
-
-def _print_menu(rich_console: RichConsole) -> None:
-    rich_console.print(
-        "\n[bold yellow]Outline Actions:[/bold yellow]\n"
-        "  Enter a natural-language instruction to revise the outline\n"
-        "  [cyan]y[/cyan]            — Approve outline and continue (default)\n"
-    )

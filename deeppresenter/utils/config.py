@@ -1,14 +1,22 @@
 import asyncio
 import json
 import random
+import time
+import inspect
 from itertools import cycle, product
 from pathlib import Path
 from typing import Any
+from collections.abc import Awaitable, Callable
 
 import json_repair
 import yaml
 from openai import AsyncOpenAI
 from openai.types.chat import ChatCompletion
+from openai.types.chat.chat_completion import ChatCompletionMessage, Choice
+from openai.types.chat.chat_completion_message_tool_call import (
+    ChatCompletionMessageFunctionToolCall,
+    Function,
+)
 from openai.types.images_response import ImagesResponse
 from pydantic import BaseModel, Field, PrivateAttr, ValidationError
 
@@ -91,20 +99,37 @@ class Endpoint(BaseModel):
             **self.client_kwargs,
         )
 
+    @property
+    def is_ollama(self) -> bool:
+        """Check if this endpoint is using Ollama"""
+        return "localhost:11434" in self.base_url or "ollama" in self.base_url.lower()
+
     async def call(
         self,
         messages: list[dict[str, Any]],
         soft_response_parsing: bool,
         response_format: type[BaseModel] | None = None,
         tools: list[dict[str, Any]] | None = None,
+        on_stream_chunk: Callable[[str], Awaitable[None] | None] | None = None,
     ) -> ChatCompletion:
         """Execute a chat or tool call using the endpoint client"""
+        # Ollama compatibility: skip tool-related parameters
+        if self.is_ollama:
+            if tools is not None:
+                tools = None
+                debug("Ollama detected: disabling tool calling for compatibility")
+
+        # Use streaming when caller requests real-time chunks, or for Ollama compatibility.
+        use_stream = self.is_ollama or on_stream_chunk is not None
+        stream_params = {"stream": True} if use_stream else {}
+
         if tools is not None:
             response = await self._client.chat.completions.create(
                 model=self.model,
                 messages=messages,
                 tools=tools,
                 tool_choice="auto",
+                **stream_params,
                 **self.sampling_parameters,
             )
         elif not soft_response_parsing and response_format is not None:
@@ -112,14 +137,95 @@ class Endpoint(BaseModel):
                 model=self.model,
                 messages=messages,
                 response_format=response_format,
+                **stream_params,
                 **self.sampling_parameters,
             )
         else:
             response: ChatCompletion = await self._client.chat.completions.create(
                 model=self.model,
                 messages=messages,
+                **stream_params,
                 **self.sampling_parameters,
             )
+
+        # Collect streaming response
+        if use_stream:
+            content_parts = []
+            tool_calls: dict[int, dict[str, Any]] = {}
+            finish_reason = None
+            model_id = self.model
+            response_id = None
+            created = None
+
+            async for chunk in response:
+                if response_id is None and chunk.id:
+                    response_id = chunk.id
+                if created is None and chunk.created:
+                    created = chunk.created
+                if chunk.choices:
+                    delta = chunk.choices[0].delta
+                    if delta and delta.content:
+                        content_parts.append(delta.content)
+                        if on_stream_chunk is not None:
+                            maybe_coro = on_stream_chunk(delta.content)
+                            if inspect.isawaitable(maybe_coro):
+                                await maybe_coro
+                    if delta and delta.tool_calls:
+                        for tc in delta.tool_calls:
+                            call = tool_calls.setdefault(
+                                tc.index,
+                                {
+                                    "id": None,
+                                    "type": "function",
+                                    "function": {"name": "", "arguments": ""},
+                                },
+                            )
+                            if tc.id:
+                                call["id"] = tc.id
+                            if tc.type:
+                                call["type"] = tc.type
+                            if tc.function is not None:
+                                if tc.function.name:
+                                    call["function"]["name"] += tc.function.name
+                                if tc.function.arguments:
+                                    call["function"]["arguments"] += tc.function.arguments
+                    if chunk.choices[0].finish_reason:
+                        finish_reason = chunk.choices[0].finish_reason
+
+            rebuilt_tool_calls = None
+            if tool_calls:
+                rebuilt_tool_calls = []
+                for i in sorted(tool_calls.keys()):
+                    call = tool_calls[i]
+                    rebuilt_tool_calls.append(
+                        ChatCompletionMessageFunctionToolCall(
+                            id=call["id"] or f"call_{i}",
+                            type=call["type"] or "function",
+                            function=Function(
+                                name=call["function"]["name"],
+                                arguments=call["function"]["arguments"] or "{}",
+                            ),
+                        )
+                    )
+
+            response = ChatCompletion(
+                id=response_id or f"ollama-{id(messages)}",
+                choices=[
+                    Choice(
+                        index=0,
+                        message=ChatCompletionMessage(
+                            role="assistant",
+                            content="".join(content_parts),
+                            tool_calls=rebuilt_tool_calls,
+                        ),
+                        finish_reason=finish_reason or "stop",
+                    )
+                ],
+                created=created or int(time.time()),
+                model=model_id,
+                object="chat.completion",
+            )
+
         assert response.choices is not None and len(response.choices) > 0, (
             f"No choices returned from the model, got {response}"
         )
@@ -221,23 +327,41 @@ class LLM(BaseModel):
         response_format: type[BaseModel] | None = None,
         tools: list[dict[str, Any]] | None = None,
         retry_times: int = RETRY_TIMES,
+        on_stream_chunk: Callable[[str], Awaitable[None] | None] | None = None,
     ) -> ChatCompletion:
         """Unified interface for chat and tool calls with alternating retry"""
         if isinstance(messages, str):
             messages = [{"role": "user", "content": messages}]
-
+        print(f"retry_times = {retry_times}")
         errors = []
         iter_endpoints = cycle(self._endpoints)
         async with self._semaphore:
+            if on_stream_chunk is None:
+
+                async def _stdout_stream_chunk(chunk: str) -> None:
+                    print(chunk, end="", flush=True)
+
+                stream_callback = _stdout_stream_chunk
+                should_print_newline = True
+            else:
+                stream_callback = on_stream_chunk
+                should_print_newline = False
+            print(f"begin run endpoint.call")
             for _ in range(retry_times):
                 endpoint = next(iter_endpoints)
                 try:
-                    return await endpoint.call(
+                    response = await endpoint.call(
                         messages,
                         self.soft_response_parsing,
                         response_format,
                         tools,
+                        stream_callback,
                     )
+                    if should_print_newline:
+                        print(f"should_print_newline = {should_print_newline}")
+                    else:
+                        print("no should_print_newline")
+                    return response
                 except (AssertionError, ValidationError) as e:
                     errors.append(f"[{endpoint.model}] {e}")
                 except Exception as e:
